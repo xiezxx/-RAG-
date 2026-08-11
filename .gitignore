@@ -1,0 +1,45 @@
+# ── 敏感信息 ──
+.env
+*.pem
+*.key
+application-local.yml
+
+# ── Python ──
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+
+# ── Java / Maven ──
+spring-boot-backend/target/
+*.class
+*.jar
+!.mvn/wrapper/maven-wrapper.jar
+
+# ── Node / Vue ──
+vue-frontend/node_modules/
+vue-frontend/dist/
+
+# ── IDE ──
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+
+# ── 索引文件（体积大，可重建）──
+vector_index/*.pkl
+bm25_index/*.pkl
+
+# ── OS ──
+.DS_Store
+Thumbs.db
+~$*.docx
+~$*.xlsx
+
+# ── 临时文件 ──
+*.log
+tmp/
+temp/

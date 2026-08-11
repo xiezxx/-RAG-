@@ -1,0 +1,49 @@
+spring:
+  application:
+    name: labour-law-backend
+
+  sql:
+    init:
+      mode: always
+
+  # 文件上传限制（法律文档通常不超过 50MB）
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 50MB
+
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/demo?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=UTF-8&connectionCollation=utf8mb4_unicode_ci&characterSetResults=utf8mb4
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:123456}
+
+  # Redis (optional, not required for running)
+  redis:
+    host: localhost
+    port: 6379
+    timeout: 3000ms
+    lettuce:
+      pool:
+        max-active: 8
+        max-idle: 8
+        min-idle: 0
+
+mybatis:
+  mapper-locations: classpath:mapper/*.xml
+  type-aliases-package: com.labourlaw.entity
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
+# Python RAG
+rag:
+  service:
+    url: ${RAG_SERVICE_URL:http://localhost:8001}
+
+server:
+  port: 8089
+
+jwt:
+  secret: ${JWT_SECRET:labour-law-rag-thesis-2026-secret-key-change-in-production}
+  expiration: ${JWT_EXPIRATION:86400000}

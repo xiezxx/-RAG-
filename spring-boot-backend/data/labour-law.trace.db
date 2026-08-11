@@ -1,0 +1,6 @@
+2026-07-31 14:12:57.889044+08:00 jdbc[43]: exception
+org.h2.jdbc.JdbcSQLSyntaxErrorException: Table "USERS" not found (this database is empty); SQL statement:
+SELECT * FROM users WHERE username = ? [42104-224]
+2026-07-31 14:13:04.489529+08:00 jdbc[43]: exception
+org.h2.jdbc.JdbcSQLSyntaxErrorException: Table "USERS" not found (this database is empty); SQL statement:
+SELECT * FROM users WHERE username = ? [42104-224]
