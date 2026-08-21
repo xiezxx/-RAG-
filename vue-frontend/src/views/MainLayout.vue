@@ -27,8 +27,8 @@
 
       <div class="header-right">
         <span class="username">{{ username }}</span>
-        <span class="role-badge" :class="role === 'ADMIN' ? 'is-admin' : ''">
-          {{ role === 'ADMIN' ? '管理员' : '用户' }}
+        <span class="role-badge" :class="roleClass">
+          {{ roleLabel }}
         </span>
         <button class="logout-btn" @click="logout" title="退出登录">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -86,15 +86,27 @@
               <el-icon><Connection /></el-icon>
               <span>知识图谱</span>
             </el-menu-item>
+            <el-menu-item index="/app/knowledge">
+              <el-icon><Reading /></el-icon>
+              <span>知识科普</span>
+            </el-menu-item>
+            <el-menu-item index="/app/diagnosis">
+              <el-icon><FirstAidKit /></el-icon>
+              <span>案情诊断</span>
+            </el-menu-item>
+            <el-menu-item index="/app/contact">
+              <el-icon><Message /></el-icon>
+              <span>联系我们</span>
+            </el-menu-item>
 
-            <!-- 管理分组 -->
-            <template v-if="role === 'ADMIN'">
+            <!-- 管理分组：法规管理 = 管理员 + 研究人员；用户管理 = 仅管理员 -->
+            <template v-if="role === 'ADMIN' || role === 'RESEARCHER'">
               <div v-show="!(sidebarCollapsed && !sidebarHover)" class="menu-group-label admin">管理</div>
               <el-menu-item index="/app/statutes/manage">
                 <el-icon><EditPen /></el-icon>
                 <span>法规管理</span>
               </el-menu-item>
-              <el-menu-item index="/app/admin/users">
+              <el-menu-item v-if="role === 'ADMIN'" index="/app/admin/users">
                 <el-icon><UserFilled /></el-icon>
                 <span>用户管理</span>
               </el-menu-item>
@@ -154,6 +166,8 @@ const router = useRouter()
 const route = useRoute()
 const username = localStorage.getItem('username') || ''
 const role = localStorage.getItem('role') || 'USER'
+const roleLabel = role === 'ADMIN' ? '管理员' : role === 'RESEARCHER' ? '研究人员' : '普通用户'
+const roleClass = role === 'ADMIN' ? 'is-admin' : role === 'RESEARCHER' ? 'is-researcher' : ''
 const stats = ref(null)
 const sidebarCollapsed = ref(false)
 const sidebarHover = ref(false)
@@ -269,6 +283,11 @@ function logout() {
   background: rgba(56,189,248,0.1);
   color: #38BDF8;
   border-color: rgba(56,189,248,0.2);
+}
+.role-badge.is-researcher {
+  background: rgba(251,191,36,0.1);
+  color: #FBBF24;
+  border-color: rgba(251,191,36,0.2);
 }
 .logout-btn {
   display: flex; align-items: center; gap: 5px;

@@ -4,7 +4,8 @@
 import re
 import pickle
 import os
-from typing import List, Tuple, Dict
+import time
+from typing import List, Tuple, Dict, Optional
 import numpy as np
 from rank_bm25 import BM25Okapi
 from langchain_core.documents import Document
@@ -33,6 +34,33 @@ LAW_KEYWORDS = [
 # RRF 常数，控制排名对最终分数的影响
 RRF_K = 60
 
+# ── 检索模式（消融实验同款开关组合，供问答页现场切换演示）──
+RETRIEVAL_MODES = {
+    "full":                dict(use_bm25=True, use_vector=True, use_graph=True,  use_timeliness=True,  use_expansion=True),
+    "bm25":                dict(use_bm25=True, use_vector=False, use_graph=False, use_timeliness=False, use_expansion=False),
+    "vector":              dict(use_bm25=False, use_vector=True, use_graph=False, use_timeliness=False, use_expansion=False),
+    "graph":               dict(use_bm25=False, use_vector=False, use_graph=True, use_timeliness=False, use_expansion=False),
+    "bm25+vector":         dict(use_bm25=True, use_vector=True, use_graph=False, use_timeliness=False, use_expansion=False),
+    "bm25+vector+kg":      dict(use_bm25=True, use_vector=True, use_graph=True,  use_timeliness=False, use_expansion=False),
+    "bm25+vector+kg+time": dict(use_bm25=True, use_vector=True, use_graph=True,  use_timeliness=True,  use_expansion=False),
+}
+
+
+def _doc_title(doc: Document) -> str:
+    """提取文档的展示标题（法条=法律名+条文号，案例=案号）"""
+    m = doc.metadata
+    doc_type = m.get("doc_type", "")
+    if doc_type in ("statute", "interpretation", "graph_article"):
+        base = m.get("law_name") or m.get("statute") or ""
+        if m.get("article_id"):
+            base = f"{base} {m['article_id']}"
+        return base or doc.page_content[:40]
+    if m.get("case_number"):
+        return m["case_number"]
+    if m.get("title"):
+        return m["title"]
+    return doc.page_content[:40]
+
 
 def _tokenize(text: str) -> List[str]:
     """简单中文分词：按标点 + 空格切分，同时保留 2-4 字词组"""
@@ -52,7 +80,9 @@ def _rrf_fusion(
     weights: List[float],
     k: int = RRF_K,
     final_top_k: int = None,
-) -> List[Document]:
+    collect: bool = False,
+    channel_names: Optional[List[str]] = None,
+):
     """
     Reciprocal Rank Fusion — 融合多路检索结果。
 
@@ -60,16 +90,19 @@ def _rrf_fusion(
     weights:      每路检索的权重
     k:            RRF 平滑常数（默认 60）
     final_top_k:  返回的文档数（默认 Config.FINAL_TOP_K）
+    collect:      True 时返回 (docs, 融合明细行) 供检索过程可视化使用
     """
     if not ranked_lists:
-        return []
+        return ([], []) if collect else []
 
     final_top_k = final_top_k or Config.FINAL_TOP_K
     scores: Dict[str, float] = {}          # doc_id -> RRF 累积分数
     doc_map: Dict[str, Document] = {}       # doc_id -> Document
+    contrib: Dict[str, Dict[str, int]] = {} # doc_id -> {通道名: 最优排名}
 
     for path_idx, ranked in enumerate(ranked_lists):
         w = weights[path_idx] if path_idx < len(weights) else 1.0
+        ch_name = channel_names[path_idx] if collect and channel_names and path_idx < len(channel_names) else str(path_idx)
         for rank, (doc, _score) in enumerate(ranked):
             # 用 page_content 的前 200 字符作为去重 key
             doc_id = doc.page_content[:200]
@@ -79,10 +112,31 @@ def _rrf_fusion(
             else:
                 scores[doc_id] = rrf_score
                 doc_map[doc_id] = doc
+            if collect:
+                if doc_id not in contrib:
+                    contrib[doc_id] = {}
+                if ch_name not in contrib[doc_id] or rank + 1 < contrib[doc_id][ch_name]:
+                    contrib[doc_id][ch_name] = rank + 1
 
     # 按 RRF 分数降序排列
     sorted_ids = sorted(scores.keys(), key=lambda x: scores[x], reverse=True)
-    return [doc_map[doc_id] for doc_id in sorted_ids[:final_top_k]]
+    docs = [doc_map[doc_id] for doc_id in sorted_ids[:final_top_k]]
+
+    if not collect:
+        return docs
+
+    rows = []
+    for i, doc_id in enumerate(sorted_ids[:final_top_k]):
+        doc = doc_map[doc_id]
+        rows.append({
+            "rank": i + 1,
+            "title": _doc_title(doc),
+            "rrf_score": round(scores[doc_id], 4),
+            "channels": dict(sorted(contrib.get(doc_id, {}).items())),
+            "doc_type": doc.metadata.get("doc_type", ""),
+            "status": doc.metadata.get("status", "") or doc.metadata.get("status_label", ""),
+        })
+    return docs, rows
 
 
 # ── BM25 检索器 ───────────────────────────────────────
@@ -204,58 +258,194 @@ class HybridRetriever:
     def is_ready(self) -> bool:
         return self.bm25.is_ready() or self.vector.is_ready()
 
+    # ── 检索模式切换（消融演示）─────────────────────
+
+    def apply_mode(self, mode: str) -> Optional[Tuple[bool, bool, bool, bool, bool]]:
+        """按模式名切换消融开关，返回切换前状态供 restore_mode 还原。
+        未知模式抛 ValueError；mode=None/''/full 时返回 None（保持现状）。"""
+        if not mode or mode == "full":
+            return None
+        toggles = RETRIEVAL_MODES.get(mode)
+        if toggles is None:
+            raise ValueError(f"未知检索模式: {mode}")
+        saved = (self.use_bm25, self.use_vector, self.use_graph,
+                 self.use_timeliness, self.use_expansion)
+        self.use_bm25 = toggles["use_bm25"]
+        self.use_vector = toggles["use_vector"]
+        self.use_graph = toggles["use_graph"]
+        self.use_timeliness = toggles["use_timeliness"]
+        self.use_expansion = toggles["use_expansion"]
+        return saved
+
+    def restore_mode(self, saved: Optional[Tuple[bool, bool, bool, bool, bool]]):
+        """还原 apply_mode 保存的开关状态"""
+        if saved is None:
+            return
+        (self.use_bm25, self.use_vector, self.use_graph,
+         self.use_timeliness, self.use_expansion) = saved
+
     # ── 核心检索 ─────────────────────────────────────
 
     def retrieve(self, query: str, final_top_k: int = None) -> List[Document]:
         """
         三路混合检索 + RRF 融合 + 时效过滤 + 自动策略选择
         """
+        docs, _ = self._retrieve(query, final_top_k, collect=False)
+        return docs
+
+    def retrieve_with_trace(self, query: str, final_top_k: int = None):
+        """同 retrieve，但额外返回检索过程明细（供前端可视化面板展示）。
+        返回 (docs, trace_dict)"""
+        return self._retrieve(query, final_top_k, collect=True)
+
+    def _retrieve(self, query: str, final_top_k: int, collect: bool):
+        """检索核心实现；collect=True 时逐环节记录 trace。"""
+        t_total = time.time()
         ranked_lists: List[List[Tuple[Document, float]]] = []
         weights: List[float] = []
+        channel_names: List[str] = []
+        trace = {
+            "query": query,
+            "strategy": None,
+            "reference_date": None,
+            "channels": [],
+            "fusion": None,
+            "final": [],
+            "timings": {},
+        } if collect else None
 
         # 自动检测问题类型，动态调整权重
         strategy = self._detect_strategy(query)
+        if collect:
+            trace["strategy"] = strategy
 
         # 解析时间参考（消融时可关闭）
         reference_date, time_hint = None, None
         if self.use_timeliness:
+            t = time.time()
             reference_date, time_hint = parse_time_reference(query)
+            if collect:
+                trace["timings"]["time_parse_ms"] = round((time.time() - t) * 1000, 1)
+        if collect:
+            trace["reference_date"] = reference_date
 
         # ── 路径 1：BM25 关键词检索 ──
+        t = time.time()
+        bm25_results: List[Tuple[Document, float]] = []
         if self.use_bm25 and self.bm25.is_ready():
             bm25_results = self.bm25.search(query, top_k=Config.BM25_SEARCH_TOP_K)
             ranked_lists.append(bm25_results)
             weights.append(strategy["bm25_weight"])
+            channel_names.append("bm25")
+        if collect:
+            trace["channels"].append(self._channel_trace(
+                "bm25", "BM25 关键词", bm25_results[:5],
+                strategy["bm25_weight"] if bm25_results else 0,
+                time.time() - t, self.use_bm25,
+            ))
 
         # ── 路径 2：向量语义检索 ──
+        t = time.time()
+        vec_results: List[Tuple[Document, float]] = []
         if self.use_vector and self.vector.is_ready():
             vec_results = self.vector.search(query, top_k=Config.VECTOR_SEARCH_TOP_K)
             ranked_lists.append(vec_results)
             weights.append(strategy["vector_weight"])
+            channel_names.append("vector")
+        if collect:
+            trace["channels"].append(self._channel_trace(
+                "vector", "向量语义", vec_results[:5],
+                strategy["vector_weight"] if vec_results else 0,
+                time.time() - t, self.use_vector,
+            ))
 
         # ── 路径 3：Neo4j 图谱检索（含时效）──
+        t = time.time()
+        graph_results: List[Document] = []
         if self.use_graph:
             graph_results = self._graph_search(query, reference_date)
             if graph_results:
                 ranked_lists.append([(doc, 1.0) for doc in graph_results])
                 weights.append(strategy["graph_weight"])
+                channel_names.append("graph")
+        if collect:
+            trace["channels"].append(self._channel_trace(
+                "graph", "知识图谱", [(doc, 1.0) for doc in graph_results[:5]],
+                strategy["graph_weight"] if graph_results else 0,
+                time.time() - t, self.use_graph,
+            ))
 
         # ── RRF 融合 ──
         if not ranked_lists:
-            return []
+            if collect:
+                trace["timings"]["total_ms"] = round((time.time() - t_total) * 1000, 1)
+                return [], trace
+            return [], None
 
-        merged = _rrf_fusion(
-            ranked_lists,
-            weights,
-            final_top_k=final_top_k or Config.FINAL_TOP_K,
-        )
+        t = time.time()
+        if collect:
+            merged, fusion_rows = _rrf_fusion(
+                ranked_lists, weights,
+                final_top_k=final_top_k or Config.FINAL_TOP_K,
+                collect=True, channel_names=channel_names,
+            )
+            trace["fusion"] = {"k": RRF_K, "rows": fusion_rows}
+        else:
+            merged = _rrf_fusion(
+                ranked_lists, weights,
+                final_top_k=final_top_k or Config.FINAL_TOP_K,
+            )
+        if collect:
+            trace["timings"]["fusion_ms"] = round((time.time() - t) * 1000, 1)
 
         # ── 时效过滤与标注 ──
+        t = time.time()
         if self.use_timeliness:
             prefer_current = reference_date is None
             merged = filter_by_timeliness(merged, reference_date, prefer_current)
 
-        return merged
+        if collect:
+            trace["timings"]["timeliness_ms"] = round((time.time() - t) * 1000, 1)
+            final_titles = [_doc_title(d) for d in merged]
+            for row in trace["fusion"]["rows"]:
+                if row["title"] in final_titles:
+                    row["final_rank"] = final_titles.index(row["title"]) + 1
+                    row["in_final"] = True
+            trace["final"] = [
+                {"rank": i + 1, "title": _doc_title(d),
+                 "doc_type": d.metadata.get("doc_type", ""),
+                 "status": d.metadata.get("status", "") or d.metadata.get("status_label", "")}
+                for i, d in enumerate(merged)
+            ]
+            trace["timings"]["total_ms"] = round((time.time() - t_total) * 1000, 1)
+            return merged, trace
+
+        return merged, None
+
+    @staticmethod
+    def _channel_trace(name: str, label: str, pairs: List[Tuple[Document, float]],
+                       weight: float, elapsed: float, enabled: bool) -> Dict:
+        """组装单路检索通道的 trace 摘要（pairs 为该路命中的 (doc, score) 前 5 条）"""
+        hits = []
+        for rank, (doc, score) in enumerate(pairs, 1):
+            m = doc.metadata
+            hits.append({
+                "rank": rank,
+                "title": _doc_title(doc),
+                "score": round(float(score), 4),
+                "doc_type": m.get("doc_type", ""),
+                "status": m.get("status", "") or m.get("status_label", ""),
+                "via_entity": m.get("via_entity", ""),
+            })
+        return {
+            "name": name,
+            "label": label,
+            "enabled": enabled and len(pairs) > 0,
+            "weight": weight,
+            "hit_count": len(pairs),
+            "latency_ms": round(elapsed * 1000, 1),
+            "hits": hits,
+        }
 
     def retrieve_as_context(self, query: str) -> str:
         """检索并格式化为 LLM 上下文（含时效标注）"""

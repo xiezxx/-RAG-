@@ -17,17 +17,20 @@
 
     <!-- 用户列表 -->
     <section class="panel">
-      <div class="panel-head"><span class="panel-index">壹</span><h3>用户列表</h3><span class="panel-count">{{ users.length }} 人</span></div>
+      <div class="panel-head">
+        <span class="panel-index">壹</span><h3>用户列表</h3><span class="panel-count">{{ users.length }} 人</span>
+        <el-button type="primary" size="small" round @click="openCreate">新增用户</el-button>
+      </div>
       <el-table :data="users" stripe v-loading="loading"
                 :header-cell-style="{ background: '#F8FAFC', color: '#334155', fontWeight: 600, fontSize: '13px' }">
         <el-table-column label="ID" prop="id" width="60" />
         <el-table-column label="用户名" prop="username" width="130" />
         <el-table-column label="姓名" prop="name" width="100" />
         <el-table-column label="联系方式" prop="phone" width="130" />
-        <el-table-column label="角色" width="90">
+        <el-table-column label="角色" width="100">
           <template #default="{row}">
-            <el-tag :type="row.role==='ADMIN'?'danger':'info'" size="small" effect="dark" round>
-              {{ row.role==='ADMIN'?'管理员':'用户' }}
+            <el-tag :type="roleTagType(row.role)" size="small" effect="dark" round>
+              {{ roleLabel(row.role) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -43,10 +46,11 @@
             <span class="muted-text">{{ row.createdAt }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="280" fixed="right">
+        <el-table-column label="操作" width="370" fixed="right">
           <template #default="{row}">
-            <el-button size="small" @click="toggleRole(row)" round :type="row.role==='ADMIN'?'warning':'success'">
-              {{ row.role==='ADMIN'?'降为用户':'升管理员' }}
+            <el-button size="small" round @click="openEdit(row)">编辑</el-button>
+            <el-button size="small" type="warning" round @click="toggleRole(row)">
+              {{ nextRoleLabel(row.role) }}
             </el-button>
             <el-button size="small" @click="toggleStatus(row)" round :type="row.status==='启用'?'warning':'success'">
               {{ row.status==='启用'?'停用':'启用' }}
@@ -77,16 +81,98 @@
         </el-table-column>
       </el-table>
     </section>
+
+    <!-- 登录记录 -->
+    <section class="panel">
+      <div class="panel-head"><span class="panel-index">叁</span><h3>登录记录</h3></div>
+      <el-table :data="loginLogs" stripe size="small" max-height="300"
+                :header-cell-style="{ background: '#F8FAFC', color: '#334155', fontWeight: 600, fontSize: '13px' }">
+        <el-table-column prop="username" label="用户" width="120" />
+        <el-table-column label="结果" width="90">
+          <template #default="{row}">
+            <el-tag :type="row.success ? 'success' : 'danger'" size="small" effect="plain" round>
+              {{ row.success ? '成功' : '失败' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="message" label="说明" min-width="160">
+          <template #default="{row}">
+            <span class="muted-text">{{ row.message }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="ip" label="IP" width="130" />
+        <el-table-column label="时间" width="170">
+          <template #default="{row}">
+            <span class="muted-text time-text">{{ row.createdAt }}</span>
+          </template>
+        </el-table-column>
+      </el-table>
+    </section>
+
+    <!-- 新增用户 -->
+    <el-dialog v-model="createVisible" title="新增用户" width="460px">
+      <el-form label-width="80px" @submit.prevent>
+        <el-form-item label="用户名" required>
+          <el-input v-model="createForm.username" placeholder="登录账号" />
+        </el-form-item>
+        <el-form-item label="密码" required>
+          <el-input v-model="createForm.password" type="password" placeholder="不少于6位" show-password />
+        </el-form-item>
+        <el-form-item label="姓名">
+          <el-input v-model="createForm.name" placeholder="选填，默认同用户名" />
+        </el-form-item>
+        <el-form-item label="联系方式">
+          <el-input v-model="createForm.phone" placeholder="选填" />
+        </el-form-item>
+        <el-form-item label="角色">
+          <el-select v-model="createForm.role" style="width: 100%">
+            <el-option label="普通用户" value="USER" />
+            <el-option label="研究人员" value="RESEARCHER" />
+            <el-option label="管理员" value="ADMIN" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="状态">
+          <el-select v-model="createForm.status" style="width: 100%">
+            <el-option label="启用" value="启用" />
+            <el-option label="停用" value="停用" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button round @click="createVisible = false">取消</el-button>
+        <el-button type="primary" round :loading="creating" @click="submitCreate">确认新增</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 编辑用户信息 -->
+    <el-dialog v-model="editVisible" title="编辑用户信息" width="420px">
+      <el-form label-width="80px" @submit.prevent>
+        <el-form-item label="用户名">
+          <el-input :model-value="editForm.username" disabled />
+        </el-form-item>
+        <el-form-item label="姓名">
+          <el-input v-model="editForm.name" placeholder="用户姓名" />
+        </el-form-item>
+        <el-form-item label="联系方式">
+          <el-input v-model="editForm.phone" placeholder="手机号/邮箱" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button round @click="editVisible = false">取消</el-button>
+        <el-button type="primary" round :loading="saving" @click="submitEdit">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import api from '../api'
 
 const users = ref([])
 const logs = ref([])
+const loginLogs = ref([])
 const loading = ref(false)
 const statItems = ref([
   { label: '注册用户', value: 0 },
@@ -95,13 +181,70 @@ const statItems = ref([
   { label: '法规', value: 0 }
 ])
 
+// 三级角色：普通用户 → 研究人员 → 管理员
+const ROLE_META = {
+  ADMIN: { label: '管理员', type: 'danger' },
+  RESEARCHER: { label: '研究人员', type: 'warning' },
+  USER: { label: '普通用户', type: 'info' }
+}
+const ROLE_CYCLE = { USER: 'RESEARCHER', RESEARCHER: 'ADMIN', ADMIN: 'USER' }
+const ROLE_NEXT_LABEL = { USER: '升为研究人员', RESEARCHER: '升为管理员', ADMIN: '降为普通用户' }
+
+function roleLabel(role) { return (ROLE_META[role] || ROLE_META.USER).label }
+function roleTagType(role) { return (ROLE_META[role] || ROLE_META.USER).type }
+function nextRoleLabel(role) { return ROLE_NEXT_LABEL[role] || '升为研究人员' }
+
+// 新增用户
+const createVisible = ref(false)
+const creating = ref(false)
+const createForm = reactive({ username: '', password: '', name: '', phone: '', role: 'USER', status: '启用' })
+
+// 编辑用户信息（姓名/联系方式）
+const editVisible = ref(false)
+const saving = ref(false)
+const editForm = reactive({ id: null, username: '', name: '', phone: '', role: 'USER', status: '启用' })
+
+function openEdit(row) {
+  editForm.id = row.id
+  editForm.username = row.username
+  editForm.name = row.name || ''
+  editForm.phone = row.phone || ''
+  editForm.role = row.role || 'USER'
+  editForm.status = row.status || '启用'
+  editVisible.value = true
+}
+
+async function submitEdit() {
+  saving.value = true
+  try {
+    // role/status 原样回传，避免后端默认值覆盖
+    const res = await api.put(`/admin/users/${editForm.id}`, {
+      role: editForm.role,
+      status: editForm.status,
+      name: editForm.name.trim(),
+      phone: editForm.phone.trim()
+    })
+    if (res.code === 200) {
+      ElMessage.success('已保存')
+      editVisible.value = false
+      load()
+    } else {
+      ElMessage.error(res.message || '保存失败')
+    }
+  } catch (e) {
+    ElMessage.error('保存失败：' + (e?.message || '网络错误'))
+  }
+  saving.value = false
+}
+
 async function load() {
   loading.value = true
   try {
-    const [ur, sr, lr] = await Promise.all([
+    const [ur, sr, lr, llr] = await Promise.all([
       api.get('/admin/users'),
       api.get('/admin/stats'),
-      api.get('/admin/logs', { params: { limit: 30 } })
+      api.get('/admin/logs', { params: { limit: 30 } }),
+      api.get('/admin/login-logs', { params: { limit: 30 } })
     ])
     if (ur.code === 200) users.value = ur.data
     if (sr.code === 200) {
@@ -111,14 +254,53 @@ async function load() {
       statItems.value[3].value = sr.data.statutes || 0
     }
     if (lr.code === 200) logs.value = lr.data
+    if (llr.code === 200) loginLogs.value = llr.data
   } catch (error) {
     console.warn('加载用户管理数据失败', error)
   }
   loading.value = false
 }
 
+function openCreate() {
+  createForm.username = ''
+  createForm.password = ''
+  createForm.name = ''
+  createForm.phone = ''
+  createForm.role = 'USER'
+  createForm.status = '启用'
+  createVisible.value = true
+}
+
+async function submitCreate() {
+  if (!createForm.username.trim() || !createForm.password) {
+    ElMessage.warning('请填写用户名和密码')
+    return
+  }
+  creating.value = true
+  try {
+    const res = await api.post('/admin/users', {
+      username: createForm.username.trim(),
+      password: createForm.password,
+      name: createForm.name.trim(),
+      phone: createForm.phone.trim(),
+      role: createForm.role,
+      status: createForm.status
+    })
+    if (res.code === 200) {
+      ElMessage.success('新增成功')
+      createVisible.value = false
+      load()
+    } else {
+      ElMessage.error(res.message || '新增失败')
+    }
+  } catch (e) {
+    ElMessage.error('新增失败：' + (e?.message || '网络错误'))
+  }
+  creating.value = false
+}
+
 async function toggleRole(row) {
-  const newRole = row.role === 'ADMIN' ? 'USER' : 'ADMIN'
+  const newRole = ROLE_CYCLE[row.role] || 'USER'
   await api.put(`/admin/users/${row.id}`, { role: newRole, status: row.status || '启用' })
   ElMessage.success('角色已更新')
   load()

@@ -65,6 +65,8 @@
                     </div>
                     <div class="source-title-text">{{ s.title }}</div>
                     <div class="source-snippet" v-if="s.snippet">{{ s.snippet.substring(0,150) }}...</div>
+                    <button v-if="s.status === '已被修订' && s.article && (s.law || s.title !== '未知来源')"
+                            class="source-diff-btn" @click="openVersionDiff(s)" title="查看该条文修订前后的内容变化">📜 修订对比</button>
                   </div>
                 </div>
               </div>
@@ -81,12 +83,66 @@
                   <svg v-else width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="4"/><rect x="7" y="7" width="10" height="10" rx="2"/></svg>
                   <span>{{ msg._speaking?'停止':'语音' }}</span>
                 </button>
-                <button class="action-btn" @click="rateMsg(msg,1)" :class="{active:msg._rating===1}">
+                <button class="action-btn" v-if="msg._mine !== false" @click="rateMsg(msg,1)" :class="{active:msg._rating===1}">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform:scaleY(-1)"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/></svg>
                 </button>
-                <button class="action-btn" @click="rateMsg(msg,5)" :class="{active:msg._rating===5}">
+                <button class="action-btn" v-if="msg._mine !== false" @click="rateMsg(msg,5)" :class="{active:msg._rating===5}">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/></svg>
                 </button>
+                <button class="action-btn" v-if="msg.trace" :class="{active:msg._showTrace}" @click="toggleTrace(msg)" title="查看本次回答的检索过程">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+                  <span>检索过程</span>
+                </button>
+              </div>
+
+              <!-- ── 检索过程可视化面板 ── -->
+              <div v-if="msg._showTrace && msg.trace" class="trace-panel">
+                <div class="trace-head">
+                  <span class="trace-title">🔍 检索过程</span>
+                  <span class="trace-chip mode">{{ modeLabel(msg.trace.mode) }}</span>
+                  <span class="trace-chip">总耗时 {{ msg.trace.timings?.total_ms }}ms</span>
+                  <span class="trace-chip" v-if="msg.trace.timings?.rewrite_ms != null">查询改写 {{ msg.trace.timings.rewrite_ms }}ms</span>
+                </div>
+                <div class="trace-meta">
+                  <div class="trace-row"><span class="k">原始问题</span><span class="v">{{ msg.trace.original_question }}</span></div>
+                  <div class="trace-row"><span class="k">改写查询</span><span class="v">{{ msg.trace.query }}</span></div>
+                  <div class="trace-row"><span class="k">时间参考</span><span class="v">{{ msg.trace.reference_date || '未指定 → 现行有效优先' }}</span></div>
+                  <div class="trace-row"><span class="k">策略权重</span><span class="v">
+                    <span class="w-chip bm25">BM25 ×{{ msg.trace.strategy?.bm25_weight }}</span>
+                    <span class="w-chip vec">向量 ×{{ msg.trace.strategy?.vector_weight }}</span>
+                    <span class="w-chip kg">图谱 ×{{ msg.trace.strategy?.graph_weight }}</span>
+                  </span></div>
+                </div>
+                <div class="trace-channels">
+                  <div v-for="ch in msg.trace.channels" :key="ch.name" class="tc-card" :class="{off:!ch.enabled}">
+                    <div class="tc-head">
+                      <span class="tc-dot" :style="{background:channelColor(ch.name)}"></span>
+                      <b>{{ ch.label }}</b>
+                      <span class="tc-w">权重 {{ ch.weight }}</span>
+                      <span class="tc-lat">{{ ch.latency_ms }}ms</span>
+                    </div>
+                    <div class="tc-body" v-if="ch.enabled">
+                      <div v-for="h in ch.hits" :key="h.rank" class="tc-hit">
+                        <span class="tc-rank">#{{ h.rank }}</span>
+                        <span class="tc-title" :title="h.title">{{ h.title }}</span>
+                        <span class="tc-score">{{ h.score }}</span>
+                      </div>
+                    </div>
+                    <div class="tc-empty" v-else>未启用</div>
+                  </div>
+                </div>
+                <div class="trace-fusion">
+                  <div class="tf-title">RRF 融合排序（k = {{ msg.trace.fusion?.k }}）<span class="tf-note">「✓」表示通过时效过滤、进入最终上下文</span></div>
+                  <div class="tf-row head"><span>#</span><span>文档</span><span>来源通道</span><span>RRF分</span><span>时效</span><span>最终</span></div>
+                  <div v-for="r in msg.trace.fusion?.rows" :key="r.rank" class="tf-row" :class="{cut:!r.in_final}">
+                    <span class="tf-rank">{{ r.rank }}</span>
+                    <span class="tf-doc" :title="r.title">{{ r.title }}</span>
+                    <span class="tf-ch"><el-tag v-for="(pos,name) in r.channels" :key="name" size="small" effect="plain" round :style="{color:channelColor(name),borderColor:channelColor(name)+'66'}">{{ channelLabel(name) }}#{{ pos }}</el-tag></span>
+                    <span class="tf-rrf">{{ r.rrf_score }}</span>
+                    <span class="tf-status"><el-tag v-if="r.status" size="small" :type="statusTagType(r.status)" effect="plain" round>{{ r.status }}</el-tag><span v-else>—</span></span>
+                    <span class="tf-final"><span v-if="r.in_final" class="final-ok">✓ {{ r.final_rank }}</span><span v-else class="final-cut">✗</span></span>
+                  </div>
+                </div>
               </div>
             </div>
             <div v-if="msg.role==='user'" class="action-bar user-action">
@@ -108,6 +164,12 @@
       </div>
 
       <div class="chat-input">
+        <div class="mode-row" v-if="isAdmin">
+          <span class="mode-label">检索模式</span>
+          <button v-for="m in modes" :key="m.value" class="mode-chip" :class="{on:mode===m.value}"
+                  :disabled="thinking" :title="m.hint" @click="mode=m.value">{{ m.label }}</button>
+          <span class="mode-hint">：切换模式可对比不同检索策略的效果（对应消融实验配置）</span>
+        </div>
         <div class="input-row">
           <button class="tts-toggle" :class="{on:ttsEnabled}" @click="ttsEnabled=!ttsEnabled" :title="ttsEnabled?'关闭语音播报':'开启语音播报'">
             <svg v-if="ttsEnabled" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
@@ -129,15 +191,57 @@
         </div>
       </div>
     </main>
+
+    <!-- ── 法条修订对比抽屉（模块5 时效感知·法条版本管理）── -->
+    <el-drawer v-model="versionDiff.visible" direction="rtl" size="760px" class="vd-drawer">
+      <template #header>
+        <div class="vd-head">
+          <span class="vd-title">📜 法条修订对比</span>
+          <span v-if="versionDiff.data" class="vd-sub">{{ versionDiff.data.law_name }} · {{ versionDiff.data.article }}</span>
+        </div>
+      </template>
+      <div v-loading="versionDiff.loading" class="vd-body">
+        <template v-if="versionDiff.data">
+          <div v-if="versionDiff.data.changed" class="vd-banner">⚠️ 该条文在本次修订中内容有变化，红色为删除、绿色为新增</div>
+          <div v-else class="vd-banner ok">该条文修订前后内容一致，未发生变化</div>
+          <div class="vd-cols">
+            <div class="vd-col old">
+              <div class="vd-col-head">
+                <span class="vd-col-title">修订前版本</span>
+                <el-tag type="warning" size="small" round>{{ versionDiff.data.old.status }}</el-tag>
+              </div>
+              <div class="vd-dates">
+                公布 {{ versionDiff.data.old.publish_date || '—' }} · 施行 {{ versionDiff.data.old.effective_date || '—' }}
+              </div>
+              <div class="vd-text" v-html="versionDiff.oldHtml"></div>
+            </div>
+            <div class="vd-col new">
+              <div class="vd-col-head">
+                <span class="vd-col-title">修订后版本（当前有效）</span>
+                <el-tag type="success" size="small" round>{{ versionDiff.data.new.status }}</el-tag>
+              </div>
+              <div class="vd-dates">
+                公布 {{ versionDiff.data.new.publish_date || '—' }} · 施行 {{ versionDiff.data.new.effective_date || '—' }}
+              </div>
+              <div class="vd-text" v-html="versionDiff.newHtml"></div>
+            </div>
+          </div>
+          <div class="vd-tip">适用提示：当前有效版本以修订后内容为准；如查询修订前时间段的法律问题，系统将按历史版本作答。</div>
+        </template>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
 <script setup>
-import { ref, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { ref, nextTick, onMounted, onBeforeUnmount, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { marked } from 'marked'
 import { Plus, ChatDotRound, DArrowLeft, DArrowRight } from '@element-plus/icons-vue'
 import api from '../api'
+
+const role = localStorage.getItem('role') || 'USER'
+const isAdmin = computed(() => role === 'ADMIN') // 检索模式切换仅管理员可见（检索过程可视化所有用户可见）
 
 const question = ref(''), thinking = ref(false), messages = ref([])
 const msgBox = ref(null), textareaRef = ref(null)
@@ -146,9 +250,67 @@ const ttsEnabled = ref(true)
 let abortController = null
 let currentUtterance = null
 
+// ── 检索模式切换（消融演示）──
+const modes = [
+  { value: 'full', label: '完整混合', hint: 'BM25 + 向量 + 图谱 + 时效 + 图谱扩展（默认）' },
+  { value: 'bm25', label: '仅BM25', hint: '只走关键词检索（消融基线）' },
+  { value: 'vector', label: '仅向量', hint: '只走语义向量检索' },
+  { value: 'graph', label: '仅图谱', hint: '只走知识图谱关联检索' },
+  { value: 'bm25+vector', label: 'BM25+向量', hint: '关键词 + 语义，无图谱' },
+  { value: 'bm25+vector+kg', label: '混合·无时效', hint: '关键词 + 语义 + 图谱，关闭时效过滤（消融配置）' },
+  { value: 'bm25+vector+kg+time', label: '混合·无扩展', hint: '完整混合但关闭图谱关系扩展' },
+]
+const mode = ref('full')
+const modeLabels = {
+  full: '完整混合', bm25: '仅 BM25', vector: '仅向量', graph: '仅图谱',
+  'bm25+vector': 'BM25+向量', 'bm25+vector+kg': '混合·无时效', 'bm25+vector+kg+time': '混合·无扩展',
+}
+function modeLabel(name) { return modeLabels[name] || name }
+function channelColor(name) { return { bm25: '#3B82F6', vector: '#10B981', graph: '#8B5CF6' }[name] || '#64748B' }
+function channelLabel(name) { return { bm25: 'BM25', vector: '向量', graph: '图谱' }[name] || name }
+
 const examples = ['公司无故辞退员工怎么维权？','工伤认定的标准和流程是什么？','加班费的计算基数怎么确定？','试用期最长可以约定多久？','拖欠工资可以要求什么赔偿？','孕期被公司降薪调岗是否违法？']
 const features = [{icon:'', label:'BM25 关键词', color:'#3B82F6'},{icon:'', label:'向量语义', color:'#10B981'},{icon:'', label:'知识图谱', color:'#8B5CF6'},{icon:'', label:'时效感知', color:'#F59E0B'}]
 
+function toggleTrace(msg) { msg._showTrace = !msg._showTrace }
+
+// ── 法条修订对比（模块5 时效感知·法条版本管理）──
+const versionDiff = ref({visible:false, loading:false, data:null, oldHtml:'', newHtml:''})
+function escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+// 字符级 LCS 差异渲染：修订前标红删除线，修订后标绿新增
+function diffRender(oldText, newText){
+  const a=[...String(oldText||'')], b=[...String(newText||'')], n=a.length, m=b.length
+  const dp=Array.from({length:n+1},()=>new Array(m+1).fill(0))
+  for(let i=n-1;i>=0;i--)for(let j=m-1;j>=0;j--)dp[i][j]=a[i]===b[j]?dp[i+1][j+1]+1:Math.max(dp[i+1][j],dp[i][j+1])
+  let oldHtml='',newHtml='',i=0,j=0
+  while(i<n&&j<m){
+    if(a[i]===b[j]){oldHtml+=escHtml(a[i]);newHtml+=escHtml(a[i]);i++;j++}
+    else if(dp[i+1][j]>=dp[i][j+1]){oldHtml+='<del class="vd-del">'+escHtml(a[i])+'</del>';i++}
+    else{newHtml+='<ins class="vd-ins">'+escHtml(b[j])+'</ins>';j++}
+  }
+  while(i<n){oldHtml+='<del class="vd-del">'+escHtml(a[i])+'</del>';i++}
+  while(j<m){newHtml+='<ins class="vd-ins">'+escHtml(b[j])+'</ins>';j++}
+  return {oldHtml,newHtml}
+}
+function openVersionDiff(s){
+  const law = s.law || (s.title && s.title !== '未知来源' ? s.title : '')
+  if(!law || !s.article){ElMessage.warning('该来源无法进行修订对比');return}
+  versionDiff.value={visible:true, loading:true, data:null, oldHtml:'', newHtml:''}
+  api.get('/version/compare',{params:{law, article:s.article}})
+    .then(res=>{
+      if(res?.code===200 && res.data){
+        const d=diffRender(res.data.old.text, res.data.new.text)
+        versionDiff.value.data=res.data
+        versionDiff.value.oldHtml=d.oldHtml
+        versionDiff.value.newHtml=d.newHtml
+      }else{
+        ElMessage.info(res?.message||'暂无修订对比数据')
+        versionDiff.value.visible=false
+      }
+    })
+    .catch(()=>{ElMessage.error('修订对比加载失败');versionDiff.value.visible=false})
+    .finally(()=>{versionDiff.value.loading=false})
+}
 function copyMessage(msg) {
   const div = document.createElement('div'); div.innerHTML = renderMarkdown(msg.content)
   const txt = div.textContent||div.innerText||''
@@ -163,11 +325,11 @@ async function rateMsg(msg,rating) {
 async function loadConversations() {
   try{const res=await api.get('/eval/history',{params:{limit:100}});if(res.code!==200||!res.data?.length)return
     const groups={}
-    for(const h of res.data){const date=h.createdAt?.split(' ')[0]||h.createdAt?.substring(0,10)||'未知日期';if(!groups[date])groups[date]=[];groups[date].push({id:h.id,title:(h.question||'新对话').substring(0,40),question:h.question,answer:h.answer,sources:h.sources,rating:h.rating,createdAt:h.createdAt})}
+    for(const h of res.data){const date=h.createdAt?.split(' ')[0]||h.createdAt?.substring(0,10)||'未知日期';if(!groups[date])groups[date]=[];groups[date].push({id:h.id,title:(h.question||'新对话').substring(0,40),question:h.question,answer:h.answer,sources:h.sources,rating:h.rating,createdAt:h.createdAt,mine:h.mine})}
     conversations.value=Object.entries(groups).map(([date,items])=>({date,items})).sort((a,b)=>b.date.localeCompare(a.date))
   }catch(e){console.warn('加载失败',e)}
 }
-function loadConversation(conv){activeConvId.value=conv.id;messages.value=[{role:'user',content:conv.question},{role:'assistant',content:conv.answer,sources:conv.sources?tryParse(conv.sources):[]}];nextTick(()=>scrollBottom())}
+function loadConversation(conv){activeConvId.value=conv.id;messages.value=[{role:'user',content:conv.question},{role:'assistant',content:conv.answer,sources:conv.sources?tryParse(conv.sources):[],_mine:conv.mine,_showTrace:false}];nextTick(()=>scrollBottom())}
 function tryParse(s){try{return JSON.parse(s.replace(/SourceItem\(/g,'{"type":').replace(/type=/g,'"type":').replace(/title=/g,'"title":').replace(/snippet=/g,'"snippet":').replace(/\)/g,'}'))}catch{return[]}}
 function newChat(){messages.value=[];activeConvId.value=null;question.value=''}
 function quickAsk(text){question.value=text;send()}
@@ -194,7 +356,7 @@ async function send(){
         'Content-Type': 'application/json',
         'Authorization': token ? `Bearer ${token}` : ''
       },
-      body: JSON.stringify({ question: q, history }),
+      body: JSON.stringify({ question: q, history, mode: isAdmin.value ? mode.value : 'full' }),
       signal: abortController.signal
     })
 
@@ -204,9 +366,9 @@ async function send(){
       return
     }
 
-    // 创建助手消息占位
+    // 创建助手消息占位（_showTrace 显式初始化，保证响应式）
     const msgIdx = messages.value.length
-    messages.value.push({role:'assistant',content:'',sources:[]})
+    messages.value.push({role:'assistant',content:'',sources:[],_showTrace:false})
 
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
@@ -219,14 +381,19 @@ async function send(){
       const lines = buffer.split('\n')
       buffer = lines.pop() || ''  // 保留未完成的行
 
-      for (const line of lines) {
+      for (const rawLine of lines) {
+        // Spring 代理 println 在 Windows 上会把行尾写成 \r\n，剥掉 \r 再判断
+        const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine
         if (!line.startsWith('data: ') || line === 'data: [DONE]') continue
         const payload = line.substring(6)
         try {
           const obj = JSON.parse(payload)
           if (obj.__sources__) {
-            // 最后一条：来源信息
+            // 来源信息
             messages.value[msgIdx].sources = obj.__sources__.map(s => ({...s, status: s.status || ''}))
+          } else if (obj.__trace__) {
+            // 检索过程明细（可视化面板数据）
+            messages.value[msgIdx].trace = obj.__trace__
           } else if (typeof obj === 'string') {
             // 文本 token，追加到消息内容
             messages.value[msgIdx].content += obj
@@ -463,7 +630,30 @@ function onVoiceSpeak(e) {
 .source-header{display:flex;gap:6px;margin-bottom:8px}
 .source-title-text{font-size:13px;font-weight:500;color:#334155}
 .source-snippet{font-size:12px;color:var(--text-muted);line-height:1.5}
+.source-diff-btn{margin-top:8px;padding:3px 10px;border-radius:8px;border:1px solid #FCD34D;background:#FFFBEB;color:#92400E;font-size:12px;cursor:pointer;font-family:inherit;transition:all .15s}
+.source-diff-btn:hover{background:#FEF3C7;border-color:#F59E0B}
 .confidence-ok,.confidence-warn{margin-top:14px;padding:10px 14px;border-radius:12px;font-size:13px;font-weight:500}
+
+/* ── 法条修订对比抽屉 ── */
+.vd-drawer .el-drawer__header{margin-bottom:0;padding-bottom:14px;border-bottom:1px solid var(--border-color)}
+.vd-head{display:flex;align-items:baseline;gap:10px}
+.vd-title{font-size:16px;font-weight:700;color:#0F172A}
+.vd-sub{font-size:13px;color:var(--text-muted)}
+.vd-body{min-height:220px}
+.vd-banner{margin:4px 0 14px;padding:10px 14px;border-radius:10px;background:#FEF3C7;border:1px solid #FCD34D;color:#92400E;font-size:13px}
+.vd-banner.ok{background:#ECFDF5;border-color:#6EE7B7;color:#065F46}
+.vd-cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.vd-col{border:1px solid #E2E8F0;border-radius:12px;overflow:hidden;background:#FFF}
+.vd-col.old{background:#FFFBEB}
+.vd-col.new{background:#F0FDF4}
+.vd-col-head{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px dashed #E2E8F0}
+.vd-col-title{font-size:14px;font-weight:600;color:#334155}
+.vd-dates{padding:8px 14px;font-size:12px;color:var(--text-muted);border-bottom:1px dashed #E2E8F0}
+.vd-text{padding:12px 14px;font-size:13px;line-height:1.9;color:#334155;white-space:pre-wrap;max-height:52vh;overflow-y:auto}
+.vd-del{background:#FEE2E2;color:#B91C1C;text-decoration:line-through;border-radius:3px;padding:0 1px}
+.vd-ins{background:#DCFCE7;color:#15803D;border-radius:3px;padding:0 1px;text-decoration:none}
+.vd-tip{margin-top:14px;padding:10px 14px;border-radius:10px;background:#F0F9FF;border:1px solid #BAE6FD;color:#0369A1;font-size:12px;line-height:1.6}
+@media (max-width:860px){.vd-cols{grid-template-columns:1fr}}
 .confidence-warn{background:#FEF3C7;color:#92400E;border:1px solid #FCD34D}
 .confidence-ok{background:#ECFDF5;color:#065F46;border:1px solid #6EE7B7}
 
@@ -476,6 +666,56 @@ function onVoiceSpeak(e) {
 .user-action .action-btn{padding:4px 10px;font-size:12px}
 
 .chat-input{padding:16px 24px;border-top:1px solid var(--border-color);background:#FFF;flex-shrink:0}
+.mode-row{display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+.mode-label{font-size:12px;color:var(--text-muted);font-weight:600;margin-right:2px}
+.mode-chip{padding:4px 12px;border-radius:20px;border:1px solid #E2E8F0;background:#FFF;color:#64748B;font-size:12px;cursor:pointer;transition:all .2s;font-family:inherit}
+.mode-chip:hover:not(:disabled){border-color:#7DD3FC;color:#0369A1;transform:translateY(-1px)}
+.mode-chip.on{background:linear-gradient(135deg,#EFF6FF,#F0F9FF);border-color:#38BDF8;color:#0369A1;font-weight:600;box-shadow:0 2px 8px rgba(56,189,248,.18)}
+.mode-chip:disabled{opacity:.5;cursor:not-allowed}
+.mode-hint{margin-left:auto;font-size:11px;color:#94A3B8}
+
+/* ── 检索过程可视化面板 ── */
+.trace-panel{margin-top:16px;border:1px solid #E2E8F0;border-radius:14px;background:#F8FAFC;overflow:hidden;animation:msgIn .3s ease both}
+.trace-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:12px 16px;background:linear-gradient(90deg,#EFF6FF,transparent);border-bottom:1px solid #E2E8F0}
+.trace-title{font-size:13px;font-weight:700;color:#0369A1}
+.trace-chip{font-size:11px;color:#64748B;background:#FFF;border:1px solid #E2E8F0;border-radius:20px;padding:2px 10px}
+.trace-chip.mode{color:#0369A1;border-color:#BAE6FD;background:#F0F9FF;font-weight:600}
+.trace-meta{padding:10px 16px 0}
+.trace-row{display:flex;gap:12px;padding:5px 0;font-size:12.5px;align-items:baseline}
+.trace-row .k{flex-shrink:0;width:64px;color:#94A3B8}
+.trace-row .v{color:#334155;word-break:break-all}
+.w-chip{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;margin-right:6px;font-family:'Space Grotesk',monospace}
+.w-chip.bm25{background:#EFF6FF;color:#2563EB}
+.w-chip.vec{background:#ECFDF5;color:#059669}
+.w-chip.kg{background:#F5F3FF;color:#7C3AED}
+.trace-channels{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:12px 16px}
+.tc-card{border:1px solid #E2E8F0;border-radius:10px;background:#FFF;overflow:hidden}
+.tc-card.off{opacity:.55}
+.tc-head{display:flex;align-items:center;gap:6px;padding:8px 10px;border-bottom:1px solid #F1F5F9;background:#FBFDFF}
+.tc-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.tc-head b{font-size:12px;color:#1E293B}
+.tc-w{font-size:10px;color:#94A3B8;margin-left:auto}
+.tc-lat{font-size:10px;color:#94A3B8;font-family:'Space Grotesk',monospace}
+.tc-body{padding:4px 0;max-height:170px;overflow-y:auto}
+.tc-hit{display:flex;align-items:center;gap:6px;padding:5px 10px;font-size:11.5px;border-bottom:1px dashed #F1F5F9}
+.tc-hit:last-child{border-bottom:none}
+.tc-rank{color:#94A3B8;font-family:'Space Grotesk',monospace;flex-shrink:0}
+.tc-title{flex:1;color:#475569;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tc-score{color:#0369A1;font-family:'Space Grotesk',monospace;flex-shrink:0;font-size:11px}
+.tc-empty{text-align:center;color:#CBD5E1;font-size:12px;padding:16px 0}
+.trace-fusion{padding:0 16px 14px}
+.tf-title{font-size:12px;font-weight:600;color:#334155;padding:10px 0 8px;border-top:1px solid #E2E8F0;margin-top:2px}
+.tf-note{font-weight:400;color:#94A3B8;font-size:11px;margin-left:8px}
+.tf-row{display:grid;grid-template-columns:32px 1fr 110px 70px 74px 44px;gap:8px;align-items:center;padding:6px 10px;font-size:12px;border-bottom:1px solid #F1F5F9;background:#FFF;border-radius:6px;margin-bottom:2px}
+.tf-row.head{background:transparent;color:#94A3B8;font-size:11px;border:none;margin-bottom:0}
+.tf-row.cut{opacity:.5}
+.tf-rank{color:#94A3B8;font-family:'Space Grotesk',monospace}
+.tf-doc{color:#334155;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tf-ch{display:flex;gap:3px;flex-wrap:wrap}
+.tf-rrf{color:#0369A1;font-family:'Space Grotesk',monospace}
+.tf-final{text-align:center}
+.final-ok{color:#059669;font-weight:700;font-size:11px}
+.final-cut{color:#CBD5E1}
 .examples{margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .examples-label{font-size:12px;color:var(--text-muted);font-weight:500}
 .example-tag{cursor:pointer;transition:all .2s;border:1px solid #E2E8F0}

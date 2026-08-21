@@ -45,6 +45,11 @@ public class ChatController {
             if (request.getQuestion().length() > 4000) {
                 return Map.of("code", 400, "message", "问题长度不能超过 4000 个字符");
             }
+            // 检索模式切换仅管理员可用（普通用户固定完整混合检索）
+            String role = (String) httpRequest.getAttribute("role");
+            if (!"ADMIN".equals(role) && request.getMode() != null && !request.getMode().isBlank() && !"full".equals(request.getMode())) {
+                return Map.of("code", 403, "message", "仅管理员可切换检索模式");
+            }
             Long userId = (Long) httpRequest.getAttribute("userId");
             if (userId != null) {
                 request.setUserId(userId);
@@ -77,6 +82,16 @@ public class ChatController {
         Long userId = (Long) httpRequest.getAttribute("userId");
         if (userId != null) request.setUserId(userId);
 
+        // 检索模式切换仅管理员可用（普通用户固定完整混合检索）
+        String role = (String) httpRequest.getAttribute("role");
+        if (!"ADMIN".equals(role) && request.getMode() != null && !request.getMode().isBlank() && !"full".equals(request.getMode())) {
+            response.setStatus(403);
+            response.setContentType("application/json");
+            response.setCharacterEncoding("UTF-8");
+            response.getWriter().write("{\"code\":403,\"message\":\"仅管理员可切换检索模式\"}");
+            return;
+        }
+
         // 设置 SSE 响应头
         response.setContentType("text/event-stream");
         response.setCharacterEncoding("UTF-8");
@@ -85,11 +100,14 @@ public class ChatController {
         response.setHeader("X-Accel-Buffering", "no");
 
         // 构建请求体
-        String requestBody = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(Map.of(
-            "question", request.getQuestion(),
-            "history", request.getHistory() != null ? request.getHistory() : List.of(),
-            "top_k", 8
-        ));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("question", request.getQuestion());
+        body.put("history", request.getHistory() != null ? request.getHistory() : List.of());
+        body.put("top_k", 8);
+        if (request.getMode() != null && !request.getMode().isBlank()) {
+            body.put("mode", request.getMode());
+        }
+        String requestBody = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(body);
 
         // 连接 Python RAG SSE 端点
         URL url = new URL(ragServiceUrl + "/api/chat/stream");

@@ -77,6 +77,51 @@ def _extract_law_name_base(filename: str) -> str:
     return name
 
 
+# ── 条文切分辅助 ─────────────────────────────────
+
+# 只匹配主条文标题：条号后须跟全角空格/空白/左括号，避免命中正文内的条文引用（如"依照本法第四十六条规定"）
+ARTICLE_RE = re.compile(r'第([一二三四五六七八九十百千零]+)条(?=[　\s（])')
+_CN_DIGITS = {'零': 0, '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9}
+
+
+def cn_num_to_int(s: str) -> Optional[int]:
+    """中文数字转整数：四十六 -> 46；一百零二 -> 102"""
+    if not s:
+        return None
+    total, section = 0, 0
+    for ch in s:
+        if ch in _CN_DIGITS:
+            section = _CN_DIGITS[ch]
+        elif ch == '十':
+            total += (section or 1) * 10
+            section = 0
+        elif ch == '百':
+            total += (section or 1) * 100
+            section = 0
+        elif ch == '千':
+            total += (section or 1) * 1000
+            section = 0
+        else:
+            return None
+    return total + section
+
+
+def split_articles(text: str) -> List[Tuple[str, str]]:
+    """将法律全文切分为 [(条文号如'第四十六条', 条文正文), ...]"""
+    matches = list(ARTICLE_RE.finditer(text))
+    articles = []
+    for i, m in enumerate(matches):
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        articles.append((m.group(0), text[m.end():end].strip()))
+    return articles
+
+
+def first_article_no(text: str) -> str:
+    """提取文本中出现的第一个条文号（如'第四十六条'），无则空串"""
+    m = ARTICLE_RE.search(text)
+    return m.group(0) if m else ""
+
+
 class LegalDocumentLoader:
     """加载法律法规、司法解释和案例文本（含日期元数据）"""
 

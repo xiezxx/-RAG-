@@ -2,6 +2,7 @@ package com.labourlaw.controller;
 
 import com.labourlaw.entity.*;
 import com.labourlaw.mapper.*;
+import com.labourlaw.service.UserService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 import javax.servlet.http.HttpServletRequest;
@@ -22,6 +23,42 @@ public class AdminController {
 
     @Autowired
     private StatuteMapper statuteMapper;
+
+    @Autowired
+    private UserService userService;
+
+    @Autowired
+    private LoginLogMapper loginLogMapper;
+
+    /** 管理员新增用户（可指定角色/状态） */
+    @PostMapping("/users")
+    public Map<String, Object> createUser(@RequestBody Map<String, String> body, HttpServletRequest request) {
+        String role = (String) request.getAttribute("role");
+        if (!"ADMIN".equals(role)) return Map.of("code", 403, "message", "权限不足");
+
+        try {
+            User user = userService.createUser(
+                    body.get("username"),
+                    body.get("password"),
+                    body.get("name"),
+                    body.get("phone"),
+                    body.getOrDefault("role", "USER"),
+                    body.getOrDefault("status", "启用"));
+            user.setPassword(null);
+            logOperation(request, "新增用户", "用户=" + user.getUsername());
+            return Map.of("code", 200, "data", user, "message", "新增成功");
+        } catch (Exception e) {
+            return Map.of("code", 400, "message", e.getMessage());
+        }
+    }
+
+    /** 登录记录列表 */
+    @GetMapping("/login-logs")
+    public Map<String, Object> loginLogs(@RequestParam(defaultValue = "50") int limit, HttpServletRequest request) {
+        String role = (String) request.getAttribute("role");
+        if (!"ADMIN".equals(role)) return Map.of("code", 403, "message", "权限不足");
+        return Map.of("code", 200, "data", loginLogMapper.findRecent(limit));
+    }
 
     /** 列出所有用户 */
     @GetMapping("/users")
@@ -54,6 +91,13 @@ public class AdminController {
         String newRole = body.getOrDefault("role", "USER");
         String newStatus = body.getOrDefault("status", "启用");
         userMapper.updateRoleStatus(id, newRole, newStatus);
+        // 姓名/联系方式：仅当请求显式携带时才更新（角色/状态切换不误伤）
+        if (body.containsKey("name") || body.containsKey("phone")) {
+            User u = userMapper.findById(id);
+            String newName = body.containsKey("name") ? body.get("name") : (u != null ? u.getName() : "");
+            String newPhone = body.containsKey("phone") ? body.get("phone") : (u != null ? u.getPhone() : "");
+            userMapper.updateProfile(id, newName != null ? newName : "", newPhone != null ? newPhone : "");
+        }
         logOperation(request, "更新用户", "用户ID=" + id);
         return Map.of("code", 200, "message", "更新成功");
     }

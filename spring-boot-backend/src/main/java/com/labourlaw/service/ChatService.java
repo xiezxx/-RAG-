@@ -27,6 +27,9 @@ public class ChatService {
         ragRequest.put("question", request.getQuestion());
         ragRequest.put("top_k", 8);
         ragRequest.put("history", request.getHistory() != null ? request.getHistory() : List.of());
+        if (request.getMode() != null && !request.getMode().isBlank()) {
+            ragRequest.put("mode", request.getMode());
+        }
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);

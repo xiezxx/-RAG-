@@ -20,6 +20,9 @@ const routes = [
       { path: 'statutes', name: 'Statutes', component: () => import('../views/StatuteView.vue') },
       { path: 'statutes/manage', name: 'StatuteManager', component: () => import('../views/StatuteManager.vue') },
       { path: 'kg', name: 'KG', component: () => import('../views/KgView.vue') },
+      { path: 'knowledge', name: 'Knowledge', component: () => import('../views/KnowledgeView.vue') },
+      { path: 'diagnosis', name: 'Diagnosis', component: () => import('../views/DiagnosisView.vue') },
+      { path: 'contact', name: 'Contact', component: () => import('../views/ContactView.vue') },
       { path: 'admin/users', name: 'UserManager', component: () => import('../views/UserManager.vue') },
     ]
   }

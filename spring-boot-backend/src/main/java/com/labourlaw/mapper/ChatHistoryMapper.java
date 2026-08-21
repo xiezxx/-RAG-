@@ -22,10 +22,20 @@ public interface ChatHistoryMapper {
     int updateRating(@Param("id") Long id, @Param("userId") Long userId,
                      @Param("rating") int rating, @Param("feedback") String feedback);
 
-    @Select("SELECT ch.id, ch.question, ch.answer, ch.sources, ch.rating, ch.feedback, ch.created_at AS createdAt, u.username " +
+    /** 全部用户的问答记录（管理员视角，含用户名），created_at 用 DATE_FORMAT 转为字符串避免时区/序列化问题 */
+    @Select("SELECT ch.id, ch.question, ch.answer, ch.sources, ch.rating, ch.feedback, " +
+            "DATE_FORMAT(ch.created_at, '%Y-%m-%d %H:%i:%s') AS createdAt, u.username, ch.user_id AS userId " +
             "FROM chat_history ch JOIN users u ON ch.user_id = u.id " +
             "ORDER BY ch.created_at DESC LIMIT #{limit}")
     List<Map<String, Object>> findAllWithUserJoin(@Param("limit") int limit);
+
+    /** 所有普通用户（role='USER'）的问答记录：普通用户可见范围 = 自己 + 其他普通用户，不含管理员 */
+    @Select("SELECT ch.id, ch.question, ch.answer, ch.sources, ch.rating, ch.feedback, " +
+            "DATE_FORMAT(ch.created_at, '%Y-%m-%d %H:%i:%s') AS createdAt, u.username, ch.user_id AS userId " +
+            "FROM chat_history ch JOIN users u ON ch.user_id = u.id " +
+            "WHERE u.role = 'USER' " +
+            "ORDER BY ch.created_at DESC LIMIT #{limit}")
+    List<Map<String, Object>> findByUserRole(@Param("limit") int limit);
 
     @Select("SELECT COUNT(*) FROM chat_history")
     int count();

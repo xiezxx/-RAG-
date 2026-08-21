@@ -2,7 +2,6 @@
 .env
 *.pem
 *.key
-application-local.yml
 
 # ── Python ──
 .venv/
@@ -30,14 +29,19 @@ vue-frontend/dist/
 *.swo
 
 # ── 索引文件（体积大，可重建）──
-vector_index/*.pkl
-bm25_index/*.pkl
+vector_index/
+bm25_index/
+
+# ── Claude 内部文件 ──
+memory/
+
+# ── H2 本地数据库 ──
+spring-boot-backend/data/
 
 # ── OS ──
 .DS_Store
 Thumbs.db
-~$*.docx
-~$*.xlsx
+~$*
 
 # ── 临时文件 ──
 *.log

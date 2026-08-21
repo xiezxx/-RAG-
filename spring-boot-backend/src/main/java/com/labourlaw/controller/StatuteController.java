@@ -51,7 +51,7 @@ public class StatuteController {
     @CacheEvict(value = "statutes", key = "'list'")
     public Map<String, Object> add(@RequestBody Map<String, Object> body, HttpServletRequest request) {
         String role = (String) request.getAttribute("role");
-        if (!"ADMIN".equals(role)) return Map.of("code", 403, "message", "权限不足");
+        if (!"ADMIN".equals(role) && !"RESEARCHER".equals(role)) return Map.of("code", 403, "message", "权限不足");
 
         Statute statute = new Statute();
         statute.setName((String) body.getOrDefault("name", ""));
@@ -73,7 +73,7 @@ public class StatuteController {
     @CacheEvict(value = "statutes", key = "'list'")
     public Map<String, Object> update(@PathVariable Long id, @RequestBody Map<String, Object> body, HttpServletRequest request) {
         String role = (String) request.getAttribute("role");
-        if (!"ADMIN".equals(role)) return Map.of("code", 403, "message", "权限不足");
+        if (!"ADMIN".equals(role) && !"RESEARCHER".equals(role)) return Map.of("code", 403, "message", "权限不足");
 
         Statute statute = new Statute();
         statute.setId(id);
@@ -95,7 +95,7 @@ public class StatuteController {
     @CacheEvict(value = "statutes", key = "'list'")
     public Map<String, Object> delete(@PathVariable Long id, HttpServletRequest request) {
         String role = (String) request.getAttribute("role");
-        if (!"ADMIN".equals(role)) return Map.of("code", 403, "message", "权限不足");
+        if (!"ADMIN".equals(role) && !"RESEARCHER".equals(role)) return Map.of("code", 403, "message", "权限不足");
 
         statuteMapper.deleteById(id);
         return Map.of("code", 200, "message", "删除成功");
@@ -118,7 +118,7 @@ public class StatuteController {
             HttpServletRequest request) {
 
         String role = (String) request.getAttribute("role");
-        if (!"ADMIN".equals(role)) return Map.of("code", 403, "message", "权限不足");
+        if (!"ADMIN".equals(role) && !"RESEARCHER".equals(role)) return Map.of("code", 403, "message", "权限不足");
 
         if (file.isEmpty()) return Map.of("code", 400, "message", "文件不能为空");
 

@@ -45,8 +45,8 @@ LABEL_MAP = {
 
 
 @router.get("/entities")
-async def list_entities(entity_type: str = "LegalConcept"):
-    """列出指定类型的 KG 实体"""
+def list_entities(entity_type: str = "LegalConcept"):
+    """列出指定类型的 KG 实体（同步 def：Neo4j 查询走线程池）"""
     neo4j = get_neo4j()
     label_map = {
         "LegalConcept": "LegalConcept",
@@ -63,7 +63,7 @@ async def list_entities(entity_type: str = "LegalConcept"):
 
 
 @router.get("/all-entities")
-async def list_all_entities():
+def list_all_entities():
     """列出所有 KG 实体（按类型分组）"""
     neo4j = get_neo4j()
     result = {}
@@ -75,7 +75,7 @@ async def list_all_entities():
 
 
 @router.post("/entities")
-async def create_entity(item: EntityItem):
+def create_entity(item: EntityItem):
     """创建 KG 实体"""
     neo4j = get_neo4j()
     label_map = {
@@ -96,7 +96,7 @@ async def create_entity(item: EntityItem):
 
 
 @router.delete("/entities")
-async def delete_entity(entity_type: str, name: str):
+def delete_entity(entity_type: str, name: str):
     """删除 KG 实体"""
     neo4j = get_neo4j()
     label_map = {
@@ -114,7 +114,7 @@ async def delete_entity(entity_type: str, name: str):
 
 
 @router.post("/relations")
-async def create_relation(rel: RelationItem):
+def create_relation(rel: RelationItem):
     """创建 KG 关系（白名单校验防注入）"""
     if rel.relation not in VALID_RELATIONS:
         return {"error": f"无效关系类型: {rel.relation}"}
@@ -136,7 +136,7 @@ async def create_relation(rel: RelationItem):
 
 
 @router.get("/stats")
-async def kg_stats():
+def kg_stats():
     """KG 综合统计"""
     neo4j = get_neo4j()
     return neo4j.get_stats()

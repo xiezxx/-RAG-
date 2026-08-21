@@ -5,6 +5,7 @@ spring:
   sql:
     init:
       mode: always
+      encoding: utf-8   # Windows 平台默认 GBK 读 schema.sql 会乱码，必须显式指定
 
   # 文件上传限制（法律文档通常不超过 50MB）
   servlet:

@@ -34,22 +34,25 @@ public class KgController {
 
     @PostMapping("/entities")
     public Map<String, Object> createEntity(@RequestBody Map<String, Object> body, HttpServletRequest request) {
-        if (!"ADMIN".equals(request.getAttribute("role"))) {
+        String role = (String) request.getAttribute("role");
+        if (!"ADMIN".equals(role) && !"RESEARCHER".equals(role)) {
             return Map.of("code", 403, "message", "权限不足");
         }
         return proxyPostToPython("/api/kg/entities", body);
     }
 
     @DeleteMapping("/entities")
-    public Map<String, Object> deleteEntity(@RequestParam String entityType, @RequestParam String name, HttpServletRequest request) {
-        if (!"ADMIN".equals(request.getAttribute("role"))) {
+    public Map<String, Object> deleteEntity(@RequestParam("entity_type") String entityType, @RequestParam("name") String name, HttpServletRequest request) {
+        String role = (String) request.getAttribute("role");
+        if (!"ADMIN".equals(role) && !"RESEARCHER".equals(role)) {
             return Map.of("code", 403, "message", "权限不足");
         }
         try {
+            // 中文参数必须先 URLEncoder 再作为 URI 传递（String URL 会被 RestTemplate 二次编码 % → %25）
             String url = ragServiceUrl + "/api/kg/entities?entity_type=" +
                     java.net.URLEncoder.encode(entityType, java.nio.charset.StandardCharsets.UTF_8) +
                     "&name=" + java.net.URLEncoder.encode(name, java.nio.charset.StandardCharsets.UTF_8);
-            restTemplate.delete(url);
+            restTemplate.delete(new java.net.URI(url));
             return Map.of("ok", true);
         } catch (Exception e) {
             return Map.of("error", "KG 服务暂不可用");
